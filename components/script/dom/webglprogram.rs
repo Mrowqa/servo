@@ -285,9 +285,19 @@ impl WebGLProgram {
             return Ok(None);
         }
 
+        let mut name = String::from(name);
+        for shader in &[&self.fragment_shader, &self.vertex_shader] {
+            if let Some(shader) = shader.get() {
+                if let Some(mapped_name) = shader.get_mapped_uniform_name(&name) {
+                    name = mapped_name.clone();
+                    break
+                }
+            }
+        }
+
         let (sender, receiver) = webgl_channel().unwrap();
         self.renderer
-            .send(WebGLCommand::GetUniformLocation(self.id, String::from(name), sender))
+            .send(WebGLCommand::GetUniformLocation(self.id, name, sender))
             .unwrap();
         Ok(receiver.recv().unwrap())
     }

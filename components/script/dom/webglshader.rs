@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // https://www.khronos.org/registry/webgl/specs/latest/1.0/webgl.idl
-use angle::hl::{BuiltInResources, Output, ShaderValidator};
 use canvas_traits::webgl::{WebGLSLVersion, WebGLVersion};
 use canvas_traits::webgl::{webgl_channel, WebGLCommand, WebGLMsgSender, WebGLParameter, WebGLResult, WebGLShaderId};
 use dom::bindings::cell::DomRefCell;
@@ -16,7 +15,10 @@ use dom::webgl_extensions::ext::oesstandardderivatives::OESStandardDerivatives;
 use dom::webglobject::WebGLObject;
 use dom::window::Window;
 use dom_struct::dom_struct;
-use std::cell::Cell;
+use mozangle::shaders::{BuiltInResources, Output, ShaderValidator};
+use ref_filter_map::ref_filter_map;
+use std::cell::{Cell, Ref};
+use std::collections::HashMap;
 use std::sync::{ONCE_INIT, Once};
 
 #[derive(Clone, Copy, Debug, JSTraceable, MallocSizeOf, PartialEq)]
@@ -32,6 +34,7 @@ pub struct WebGLShader {
     id: WebGLShaderId,
     gl_type: u32,
     source: DomRefCell<Option<DOMString>>,
+    uniform_name_map: DomRefCell<Option<HashMap<String, String>>>,
     info_log: DomRefCell<Option<String>>,
     is_deleted: Cell<bool>,
     attached_counter: Cell<u32>,
@@ -47,12 +50,13 @@ impl WebGLShader {
                      id: WebGLShaderId,
                      shader_type: u32)
                      -> WebGLShader {
-        GLSLANG_INITIALIZATION.call_once(|| ::angle::hl::initialize().unwrap());
+        GLSLANG_INITIALIZATION.call_once(|| ::mozangle::shaders::initialize().unwrap());
         WebGLShader {
             webgl_object: WebGLObject::new_inherited(),
             id: id,
             gl_type: shader_type,
             source: DomRefCell::new(None),
+            uniform_name_map: DomRefCell::new(None),
             info_log: DomRefCell::new(None),
             is_deleted: Cell::new(false),
             attached_counter: Cell::new(0),
@@ -146,6 +150,7 @@ impl WebGLShader {
             match validator.compile_and_translate(&[source]) {
                 Ok(translated_source) => {
                     debug!("Shader translated: {}", translated_source);
+                    *self.uniform_name_map.borrow_mut() = Some(validator.uniform_name_map());
                     // NOTE: At this point we should be pretty sure that the compilation in the paint thread
                     // will succeed.
                     // It could be interesting to retrieve the info log from the paint thread though
@@ -166,6 +171,12 @@ impl WebGLShader {
             // This requires a more complex interface with ANGLE, using C++
             // bindings and being extremely cautious about destructing things.
         }
+    }
+
+    pub fn get_mapped_uniform_name(&self, name: &str) -> Option<Ref<String>> {
+        ref_filter_map(self.uniform_name_map.borrow(), |opt_map| {
+            opt_map.as_ref().and_then(|map| map.get(name))
+        })
     }
 
     /// Mark this shader as deleted (if it wasn't previously)
